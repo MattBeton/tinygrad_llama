@@ -1,5 +1,27 @@
 from typing import List
 
+class StructuredOutput:
+    def __init__(self, model, stop_tokens, max_tokens=None):
+        self.model = model
+
+        self.token_count = 0
+        self.max_tokens = max_tokens
+        self.stop_tokens = stop_tokens
+
+    def push_token(self, tok: int):
+        '''
+        Push a token. Currently returns a boolean indicating whether we are finished.
+        '''
+        self.token_count += 1
+
+        if self.max_tokens and self.token_count > self.max_tokens:
+            return False
+
+        if tok in self.stop_tokens:
+            return False
+        
+        return True
+
 class LlamaInferenceEngine:
     def __init__(self, model):
         self.model = model
@@ -19,12 +41,9 @@ class LlamaInferenceEngine:
 
         return prompt
 
-    def get_tokens(self, messages):
-        prompt = self.build_prompt(messages)
-
-        return 
-
     def run_inference(self, prompt: str, temperature=None):
+        structured_output = StructuredOutput(self.model, self.model.tokenizer.stop_tokens, None)
+
         toks = self.model.tokenizer.encode(prompt, allow_special=True)
 
         start_pos = self.model.prefill(toks)
@@ -42,7 +61,7 @@ class LlamaInferenceEngine:
             last_tok = tok
             self.model.last_seen_toks.append(tok)
 
-            if tok in self.model.tokenizer.stop_tokens:
+            if structured_output.push_token(tok) == False:
                 break
 
             generated_tokens.append(tok)
@@ -50,13 +69,13 @@ class LlamaInferenceEngine:
         return self.model.tokenizer.decode(generated_tokens)
 
     def run_inference_stream(self, prompt: str, temperature=None):
+        structured_output = StructuredOutput(self.model, self.model.tokenizer.stop_tokens, None)
+
         toks = self.model.tokenizer.encode(prompt, allow_special=True)
 
         start_pos = self.model.prefill(toks)
         last_tok = toks[-1]
         self.model.last_seen_toks.append(last_tok)
-
-        generated_tokens = []
 
         if temperature is None:
             temperature = self.model.TEMPERATURE
@@ -67,7 +86,7 @@ class LlamaInferenceEngine:
             last_tok = tok
             self.model.last_seen_toks.append(tok)
 
-            if tok in self.model.tokenizer.stop_tokens:
+            if structured_output.push_token(tok) == False:
                 break
 
             yield self.model.tokenizer.decode([tok])
