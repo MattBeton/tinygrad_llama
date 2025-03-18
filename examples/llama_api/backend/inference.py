@@ -49,3 +49,25 @@ class LlamaInferenceEngine:
 
         return self.model.tokenizer.decode(generated_tokens)
 
+    def run_inference_stream(self, prompt: str, temperature=None):
+        toks = self.model.tokenizer.encode(prompt, allow_special=True)
+
+        start_pos = self.model.prefill(toks)
+        last_tok = toks[-1]
+        self.model.last_seen_toks.append(last_tok)
+
+        generated_tokens = []
+
+        if temperature is None:
+            temperature = self.model.TEMPERATURE
+
+        while True:
+            tok = self.model.generate_next_token(last_tok, start_pos, temperature)
+            start_pos += 1
+            last_tok = tok
+            self.model.last_seen_toks.append(tok)
+
+            if tok in self.model.tokenizer.stop_tokens:
+                break
+
+            yield self.model.tokenizer.decode([tok])
