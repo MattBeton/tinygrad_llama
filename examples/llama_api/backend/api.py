@@ -118,12 +118,11 @@ class LlamaAPI:
             if "messages" not in rjson: 
                 abort(400, "messages required")
 
-            # check if we are streaming
-            if rjson.get("stream", False):
+            # Setup for both streaming and non-streaming
+            streaming = rjson.get("stream", False)
+            if streaming:
                 response.content_type = "text/event-stream"
                 response.set_header("Cache-Control", "no-cache")
-            else: 
-                abort(400, "streaming required")
 
             toks = [self.model.tokenizer.bos_id]
             for message in rjson["messages"]:
@@ -141,14 +140,63 @@ class LlamaAPI:
             last_tok = toks[-1]
             self.model.last_seen_toks.append(last_tok)
             
-            while True:
-                tok = self.model.generate_next_token(last_tok, start_pos, rjson.get("temperature", self.model.TEMPERATURE))
-                start_pos += 1
-                last_tok = tok
-                self.model.last_seen_toks.append(tok)
+            # For non-streaming, collect all generated tokens
+            if not streaming:
+                generated_tokens = []
                 
-                if tok in self.model.tokenizer.stop_tokens: 
-                    break
+                while True:
+                    tok = self.model.generate_next_token(last_tok, start_pos, rjson.get("temperature", self.model.TEMPERATURE))
+                    start_pos += 1
+                    last_tok = tok
+                    self.model.last_seen_toks.append(tok)
+                    
+                    if tok in self.model.tokenizer.stop_tokens: 
+                        break
+                        
+                    generated_tokens.append(tok)
+                
+                # Return a single response with the complete message
+                yield json.dumps({
+                    "id": random_id,
+                    "object": "chat.completion",
+                    "created": int(time.time()),
+                    "model": str(self.model.model_path),
+                    "choices": [{
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": self.model.tokenizer.decode(generated_tokens),
+                        },
+                        "finish_reason": "stop",
+                    }]
+                })
+
+            else:
+                # Streaming response (existing implementation)
+                while True:
+                    tok = self.model.generate_next_token(last_tok, start_pos, rjson.get("temperature", self.model.TEMPERATURE))
+                    start_pos += 1
+                    last_tok = tok
+                    self.model.last_seen_toks.append(tok)
+                    
+                    if tok in self.model.tokenizer.stop_tokens: 
+                        break
+
+                    res = {
+                        "id": random_id,
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": str(self.model.model_path),
+                        "choices": [{
+                            "index": 0,
+                            "delta": {
+                                "role": "assistant",
+                                "content": self.model.tokenizer.decode([tok]),
+                            },
+                            "finish_reason": None,
+                        }]
+                    }
+                    yield f"data: {json.dumps(res)}\n\n"
 
                 res = {
                     "id": random_id,
@@ -157,27 +205,11 @@ class LlamaAPI:
                     "model": str(self.model.model_path),
                     "choices": [{
                         "index": 0,
-                        "delta": {
-                            "role": "assistant",
-                            "content": self.model.tokenizer.decode([tok]),
-                        },
-                        "finish_reason": None,
+                        "delta": {},
+                        "finish_reason": "stop",
                     }]
                 }
                 yield f"data: {json.dumps(res)}\n\n"
-
-            res = {
-                "id": random_id,
-                "object": "chat.completion.chunk",
-                "created": int(time.time()),
-                "model": str(self.model.model_path),
-                "choices": [{
-                    "index": 0,
-                    "delta": {},
-                    "finish_reason": "stop",
-                }]
-            }
-            yield f"data: {json.dumps(res)}\n\n"
     
     def run(self, host="0.0.0.0", port=7776, debug=False):
         """Start the API server"""
