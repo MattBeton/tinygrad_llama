@@ -3,6 +3,7 @@ from pathlib import Path
 from tinygrad import Tensor, Device, GlobalCounters
 from tinygrad.helpers import Profiling, Timing, DEBUG, colored
 from .model import LlamaModel
+from .inference import LlamaInferenceEngine
 from .api import LlamaAPI
 
 def main():
@@ -41,7 +42,8 @@ def main():
     
     if not args.no_api and not args.benchmark:
         # Start the API server
-        api = LlamaAPI(model)
+        inference_engine = LlamaInferenceEngine(model)
+        api = LlamaAPI(inference_engine)
         api.run(host=args.host, port=args.port, debug=args.debug)
     
     elif args.benchmark:
