@@ -81,7 +81,6 @@ class LlamaAPI:
                 response.content_type = "text/event-stream"
                 response.set_header("Cache-Control", "no-cache")
 
-            # toks = self.inference_engine.get_tokens(rjson["messages"])
             prompt = self.inference_engine.build_prompt(rjson["messages"])
 
             # ensure that the last message was a user message
@@ -92,7 +91,7 @@ class LlamaAPI:
 
             # For non-streaming, collect all generated tokens
             if not streaming:
-                inference_result = self.inference_engine.run_inference(prompt, rjson.get("temperature"))
+                inference_result, finish_reason = self.inference_engine.run_inference(prompt, rjson.get("temperature"), rjson.get("max_tokens"))
                 
                 # Return a single response with the complete message
                 yield json.dumps({
@@ -106,35 +105,39 @@ class LlamaAPI:
                             "role": "assistant",
                             "content": inference_result,
                         },
-                        "finish_reason": "stop",
+                        "finish_reason": finish_reason.value,
                     }]
                 })
 
             else:
-                yield from (
-                    f"data: {json.dumps({
-                            "id": random_id,
-                            "object": "chat.completion.chunk",
-                            "created": int(time.time()),
-                            "model": str(self.inference_engine.model.model_path),
-                            "choices": [{
-                                "index": 0,
-                                "delta": {"content": chunk},
+                # Store chunks and get finish_reason from the generator
+                chunks = []
+                for chunk in self.inference_engine.run_inference_stream(prompt, rjson.get("temperature"), rjson.get("max_tokens")):
+                    chunks.append(chunk)
+                    yield f"data: {json.dumps({
+                            'id': random_id,
+                            'object': 'chat.completion.chunk',
+                            'created': int(time.time()),
+                            'model': str(self.inference_engine.model.model_path),
+                            'choices': [{
+                                'index': 0,
+                                'delta': {'content': chunk},
                             }],
-                            "finish_reason": None,
+                            'finish_reason': None,
                         })}\n\n"
-                    for chunk in self.inference_engine.run_inference_stream(prompt, rjson.get("temperature"))
-                )
 
+                # Get the finish_reason from the generator
+                finish_reason = yield
+                
                 res = {
-                    "id": random_id,
-                    "object": "chat.completion.chunk",
-                    "created": int(time.time()),
-                    "model": str(self.inference_engine.model.model_path),
-                    "choices": [{
-                        "index": 0,
-                        "delta": {},
-                        "finish_reason": "stop",
+                    'id': random_id,
+                    'object': 'chat.completion.chunk',
+                    'created': int(time.time()),
+                    'model': str(self.inference_engine.model.model_path),
+                    'choices': [{
+                        'index': 0,
+                        'delta': {},
+                        'finish_reason': finish_reason.value,
                     }]
                 }
                 yield f"data: {json.dumps(res)}\n\n"

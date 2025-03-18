@@ -1,4 +1,10 @@
+from enum import Enum
 from typing import List
+
+class TokenProcessingStatus(Enum):
+    CONTINUE = None  # Continue processing tokens
+    MAX_TOKENS_REACHED = "length"
+    STOP_TOKEN_REACHED = "stop"
 
 class StructuredOutput:
     def __init__(self, model, stop_tokens, max_tokens=None):
@@ -10,17 +16,17 @@ class StructuredOutput:
 
     def push_token(self, tok: int):
         '''
-        Push a token. Currently returns a boolean indicating whether we are finished.
+        Push a token. Returns a TokenProcessingStatus indicating the processing state.
         '''
         self.token_count += 1
 
-        if self.max_tokens and self.token_count > self.max_tokens:
-            return False
+        if self.max_tokens and self.token_count >= self.max_tokens:
+            return TokenProcessingStatus.MAX_TOKENS_REACHED
 
         if tok in self.stop_tokens:
-            return False
+            return TokenProcessingStatus.STOP_TOKEN_REACHED
         
-        return True
+        return TokenProcessingStatus.CONTINUE
 
 class LlamaInferenceEngine:
     def __init__(self, model):
@@ -41,8 +47,8 @@ class LlamaInferenceEngine:
 
         return prompt
 
-    def run_inference(self, prompt: str, temperature=None):
-        structured_output = StructuredOutput(self.model, self.model.tokenizer.stop_tokens, None)
+    def run_inference(self, prompt: str, temperature=None, max_tokens=None):
+        structured_output = StructuredOutput(self.model, self.model.tokenizer.stop_tokens, max_tokens)
 
         toks = self.model.tokenizer.encode(prompt, allow_special=True)
 
@@ -61,15 +67,16 @@ class LlamaInferenceEngine:
             last_tok = tok
             self.model.last_seen_toks.append(tok)
 
-            if structured_output.push_token(tok) == False:
+            finish_reason = structured_output.push_token(tok)
+            if finish_reason != TokenProcessingStatus.CONTINUE:
                 break
 
             generated_tokens.append(tok)
 
-        return self.model.tokenizer.decode(generated_tokens)
+        return self.model.tokenizer.decode(generated_tokens), finish_reason
 
-    def run_inference_stream(self, prompt: str, temperature=None):
-        structured_output = StructuredOutput(self.model, self.model.tokenizer.stop_tokens, None)
+    def run_inference_stream(self, prompt: str, temperature=None, max_tokens=None):
+        structured_output = StructuredOutput(self.model, self.model.tokenizer.stop_tokens, max_tokens)
 
         toks = self.model.tokenizer.encode(prompt, allow_special=True)
 
@@ -86,7 +93,10 @@ class LlamaInferenceEngine:
             last_tok = tok
             self.model.last_seen_toks.append(tok)
 
-            if structured_output.push_token(tok) == False:
+            finish_reason = structured_output.push_token(tok)
+            if finish_reason != TokenProcessingStatus.CONTINUE:
                 break
 
             yield self.model.tokenizer.decode([tok])
+
+        return finish_reason
