@@ -1,7 +1,8 @@
 from pathlib import Path
 import json, random, time
 from bottle import Bottle, request, response, HTTPResponse, abort, static_file
-from .inference import LlamaInferenceEngine
+from .inference import LlamaInferenceEngine, GenerationOptions
+from .tools import LlamaToolParser, ToolDefinition
 
 class LlamaAPI:
     def __init__(self, inference_engine: LlamaInferenceEngine):
@@ -81,7 +82,15 @@ class LlamaAPI:
                 response.content_type = "text/event-stream"
                 response.set_header("Cache-Control", "no-cache")
 
-            prompt = self.inference_engine.build_prompt(rjson["messages"])
+            if rjson.get("tools"):
+                tools = [ToolDefinition.model_validate(tool) for tool in rjson.get("tools")]
+            else:
+                tools = []
+
+            tools_parser = LlamaToolParser()
+            prompt = tools_parser.build_prompt(rjson["messages"], tools)
+            grammar = tools_parser.to_grammar(tools, rjson.get("strict", False))
+            generation_options = GenerationOptions(temperature=rjson.get("temperature"), max_tokens=rjson.get("max_tokens"), grammar=grammar)
 
             # ensure that the last message was a user message
             if rjson["messages"][-1]["role"] != "user": 
@@ -91,7 +100,7 @@ class LlamaAPI:
 
             # For non-streaming, collect all generated tokens
             if not streaming:
-                inference_result, finish_reason = self.inference_engine.run_inference(prompt, rjson.get("temperature"), rjson.get("max_tokens"))
+                inference_result, finish_reason = self.inference_engine.run_inference(prompt, generation_options)
                 
                 # Return a single response with the complete message
                 yield json.dumps({
@@ -112,7 +121,7 @@ class LlamaAPI:
             else:
                 # Store chunks and get finish_reason from the generator
                 chunks = []
-                for chunk in self.inference_engine.run_inference_stream(prompt, rjson.get("temperature"), rjson.get("max_tokens")):
+                for chunk in self.inference_engine.run_inference_stream(prompt, generation_options):
                     chunks.append(chunk)
                     yield f"data: {json.dumps({
                             'id': random_id,

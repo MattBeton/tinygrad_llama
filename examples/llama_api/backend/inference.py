@@ -1,20 +1,31 @@
 from enum import Enum
-from typing import List
+from typing import List, Dict
+from llguidance import LLInterpreter
+from llguidance.hf import from_tokenizer as llg_from_tokenizer
 
 class TokenProcessingStatus(Enum):
     CONTINUE = None  # Continue processing tokens
     MAX_TOKENS_REACHED = "length"
     STOP_TOKEN_REACHED = "stop"
 
+class GenerationOptions:
+    def __init__(self, temperature=None, max_tokens=None, grammar=None):
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.grammar = grammar
+
 class StructuredOutput:
-    def __init__(self, model, stop_tokens, max_tokens=None):
+    def __init__(self, model, stop_tokens, generation_options: GenerationOptions):
         self.model = model
 
         self.token_count = 0
-        self.max_tokens = max_tokens
+        self.max_tokens = generation_options.max_tokens
         self.stop_tokens = stop_tokens
+        self.grammar = generation_options.grammar
 
-    def push_token(self, tok: int):
+        # tokenizer = llg_from_tokenizer(self.model.tokenizer)
+
+    def push_token(self, tok: int) -> TokenProcessingStatus:
         '''
         Push a token. Returns a TokenProcessingStatus indicating the processing state.
         '''
@@ -32,23 +43,8 @@ class LlamaInferenceEngine:
     def __init__(self, model):
         self.model = model
 
-    def build_prompt(self, messages):
-        def encode_role(role: str):
-            return '<|start_header_id|>' + role + '<|end_header_id|>\n\n'
-
-        def encode_message(role: str, content: str):
-            return encode_role(role) + content + '<|eot_id|>'
-
-        prompt = '<|begin_of_text|>'
-        for message in messages:
-            prompt += encode_message(message["role"], message["content"])
-
-        prompt += encode_role("assistant")
-
-        return prompt
-
-    def run_inference(self, prompt: str, temperature=None, max_tokens=None):
-        structured_output = StructuredOutput(self.model, self.model.tokenizer.stop_tokens, max_tokens)
+    def run_inference(self, prompt: str, generation_options: GenerationOptions):
+        structured_output = StructuredOutput(self.model, self.model.tokenizer.stop_tokens, generation_options)
 
         toks = self.model.tokenizer.encode(prompt, allow_special=True)
 
@@ -58,11 +54,11 @@ class LlamaInferenceEngine:
 
         generated_tokens = []
 
-        if temperature is None:
-            temperature = self.model.TEMPERATURE
+        if generation_options.temperature is None:
+            generation_options.temperature = self.model.TEMPERATURE
 
         while True:
-            tok = self.model.generate_next_token(last_tok, start_pos, temperature)
+            tok = self.model.generate_next_token(last_tok, start_pos, generation_options.temperature)
             start_pos += 1
             last_tok = tok
             self.model.last_seen_toks.append(tok)
@@ -75,8 +71,8 @@ class LlamaInferenceEngine:
 
         return self.model.tokenizer.decode(generated_tokens), finish_reason
 
-    def run_inference_stream(self, prompt: str, temperature=None, max_tokens=None):
-        structured_output = StructuredOutput(self.model, self.model.tokenizer.stop_tokens, max_tokens)
+    def run_inference_stream(self, prompt: str, generation_options: GenerationOptions):
+        structured_output = StructuredOutput(self.model, self.model.tokenizer.stop_tokens, generation_options)
 
         toks = self.model.tokenizer.encode(prompt, allow_special=True)
 
@@ -84,11 +80,11 @@ class LlamaInferenceEngine:
         last_tok = toks[-1]
         self.model.last_seen_toks.append(last_tok)
 
-        if temperature is None:
-            temperature = self.model.TEMPERATURE
+        if generation_options.temperature is None:
+            generation_options.temperature = self.model.TEMPERATURE
 
         while True:
-            tok = self.model.generate_next_token(last_tok, start_pos, temperature)
+            tok = self.model.generate_next_token(last_tok, start_pos, generation_options.temperature)
             start_pos += 1
             last_tok = tok
             self.model.last_seen_toks.append(tok)
