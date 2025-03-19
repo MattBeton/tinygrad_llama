@@ -115,19 +115,23 @@ class LlamaInferenceEngine:
             generation_options.temperature = self.model.TEMPERATURE
 
         while True:
-            mask = Tensor(structured_output.get_token_mask())
-            # if mask is not None:
-            #     print([self.tokenizer.decode([tok]) for tok, val in enumerate(mask) if val == np.int32(200)])
+            mask = structured_output.get_token_mask() == 200
+
+            if mask is not None:
+                mask = Tensor(mask)
+            else:
+                mask = Tensor.ones(self.model.model_size.args["vocab_size"], dtype=dtypes.int32, device=self.model.device) * 200
+
             tok = self.model.generate_next_token(last_tok, mask, start_pos, generation_options.temperature)
             start_pos += 1
             last_tok = tok
             self.model.last_seen_toks.append(tok)
 
+            generated_tokens.append(tok)
+
             finish_reason = structured_output.push_token(tok)
             if finish_reason != TokenProcessingStatus.CONTINUE:
                 break
-
-            generated_tokens.append(tok)
 
         return self.tokenizer.decode(generated_tokens), finish_reason
 

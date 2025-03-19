@@ -182,16 +182,8 @@ class Transformer:
     for layer in self.layers: h = layer(h, start_pos, freqs_cis, mask)
     logits = self.output(self.norm(h)).float()[:, -1, :]
 
-    # print(logits.realize().numpy()[:100])
-    # print(logits_mask.realize().numpy()[:100])
-
-    # mask = (logits_mask == 0).astype(logits.dtype)
-    # # Replace logits: keep original where mask is 0, and set to -inf where mask is 1.
-    # logits = logits * (1 - mask) + mask * float("-inf")
-    
-    # logits = (logits_mask == 0).where(float("-inf"), logits)
-
-    # print(logits.realize().numpy()[:100])
+    # Mask logits
+    logits = (logits_mask == 0).where(float("-inf"), logits)
 
     return sample(logits.flatten(), temperature, top_k, top_p, alpha_f, alpha_p).realize()
 
