@@ -151,6 +151,7 @@ class LlamaAPI:
                 }
                 yield f"data: {json.dumps(res)}\n\n"
     
-    def run(self, host="0.0.0.0", port=7776, debug=False):
+    def run(self, host="0.0.0.0", port=7776, debug=True):
         """Start the API server"""
+        print(f'debug {debug}')
         self.app.run(host=host, port=port, debug=debug) 

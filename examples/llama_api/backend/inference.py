@@ -55,7 +55,6 @@ class LlamaInferenceEngine:
         def encode_message(role: str, content: str):
             return encode_role(role) + content + '<|eot_id|>'
 
-        # prompt = '<|begin_of_text|>'
         prompt = ''
         for message in messages:
             prompt += encode_message(message["role"], message["content"])
@@ -98,11 +97,10 @@ class LlamaInferenceEngine:
         stop_tokens = {self.tokenizer.eos_token_id, 128009}
         structured_output = StructuredOutput(self.model, stop_tokens, generation_options)
         
-        toks = self.tokenizer.encode(prompt, allow_special=True)
+        toks = self.tokenizer.encode(prompt)
 
         start_pos = self.model.prefill(toks)
         last_tok = toks[-1]
-        self.model.last_seen_toks.append(last_tok)
 
         if generation_options.temperature is None:
             generation_options.temperature = self.model.TEMPERATURE
