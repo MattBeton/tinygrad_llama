@@ -1,5 +1,7 @@
 from enum import Enum
 from typing import List
+from transformers import AutoTokenizer
+
 
 class TokenProcessingStatus(Enum):
     CONTINUE = None  # Continue processing tokens
@@ -32,6 +34,9 @@ class LlamaInferenceEngine:
     def __init__(self, model):
         self.model = model
 
+        tokenizer_path = str((self.model.model_path if self.model.model_path.is_dir() else self.model.model_path.parent))
+        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
+
     def build_prompt(self, messages):
         def encode_role(role: str):
             return '<|start_header_id|>' + role + '<|end_header_id|>\n\n'
@@ -39,7 +44,8 @@ class LlamaInferenceEngine:
         def encode_message(role: str, content: str):
             return encode_role(role) + content + '<|eot_id|>'
 
-        prompt = '<|begin_of_text|>'
+        # prompt = '<|begin_of_text|>'
+        prompt = ''
         for message in messages:
             prompt += encode_message(message["role"], message["content"])
 
@@ -48,13 +54,14 @@ class LlamaInferenceEngine:
         return prompt
 
     def run_inference(self, prompt: str, temperature=None, max_tokens=None):
-        structured_output = StructuredOutput(self.model, self.model.tokenizer.stop_tokens, max_tokens)
+        # For some reason the wrong stop token is loaded. So we hardcode for now.
+        stop_tokens = {self.tokenizer.eos_token_id, 128009}
+        structured_output = StructuredOutput(self.model, stop_tokens, max_tokens)
 
-        toks = self.model.tokenizer.encode(prompt, allow_special=True)
+        toks = self.tokenizer.encode(prompt)
 
         start_pos = self.model.prefill(toks)
         last_tok = toks[-1]
-        self.model.last_seen_toks.append(last_tok)
 
         generated_tokens = []
 
@@ -73,12 +80,12 @@ class LlamaInferenceEngine:
 
             generated_tokens.append(tok)
 
-        return self.model.tokenizer.decode(generated_tokens), finish_reason
+        return self.tokenizer.decode(generated_tokens), finish_reason
 
     def run_inference_stream(self, prompt: str, temperature=None, max_tokens=None):
-        structured_output = StructuredOutput(self.model, self.model.tokenizer.stop_tokens, max_tokens)
+        structured_output = StructuredOutput(self.model, self.tokenizer.stop_tokens, max_tokens)
 
-        toks = self.model.tokenizer.encode(prompt, allow_special=True)
+        toks = self.tokenizer.encode(prompt, allow_special=True)
 
         start_pos = self.model.prefill(toks)
         last_tok = toks[-1]
@@ -97,6 +104,6 @@ class LlamaInferenceEngine:
             if finish_reason != TokenProcessingStatus.CONTINUE:
                 break
 
-            yield self.model.tokenizer.decode([tok])
+            yield self.tokenizer.decode([tok])
 
         return finish_reason

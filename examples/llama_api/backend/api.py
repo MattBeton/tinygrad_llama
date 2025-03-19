@@ -62,12 +62,12 @@ class LlamaAPI:
         @self.app.post("/v1/internal/token-count")
         def token_count():
             rjson = json.loads(request.body.read())
-            return json.dumps(len(self.inference_engine.model.tokenizer.encode(rjson.get("text", ""))))
+            return json.dumps(len(self.inference_engine.tokenizer.encode(rjson.get("text", ""))))
             
         @self.app.post("/v1/token/encode")
         def token_encode():
             rjson = json.loads(request.body.read())
-            return json.dumps(self.inference_engine.model.tokenizer.encode(rjson.get("text", "")))
+            return json.dumps(self.inference_engine.tokenizer.encode(rjson.get("text", "")))
         
         @self.app.post("/v1/chat/completions")
         def chat_completions():

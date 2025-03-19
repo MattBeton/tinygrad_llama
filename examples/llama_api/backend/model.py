@@ -3,43 +3,11 @@ from typing import List
 import json, random, time, os
 import tiktoken
 from tiktoken.load import load_tiktoken_bpe
+from transformers import AutoTokenizer, PreTrainedTokenizerFast
 from extra.models.llama import Transformer, convert_from_huggingface, convert_from_gguf, fix_bf16
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters, gguf_load
 from tinygrad import Tensor, dtypes, nn, Context, Device, GlobalCounters
 from tinygrad.helpers import Profiling, Timing, DEBUG, colored, fetch, tqdm
-
-class Tokenizer:
-  pat_str = r"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"
-  def __init__(self, model_path: str):
-    mergeable_ranks = load_tiktoken_bpe(model_path)
-    self.num_base_tokens = len(mergeable_ranks)
-    special_tokens = [
-      "<|begin_of_text|>",
-      "<|end_of_text|>",
-      "<|reserved_special_token_0|>",
-      "<|reserved_special_token_1|>",
-      "<|reserved_special_token_2|>",
-      "<|reserved_special_token_3|>",
-      "<|start_header_id|>",
-      "<|end_header_id|>",
-      "<|reserved_special_token_4|>",
-      "<|eot_id|>",
-    ] + [
-      f"<|reserved_special_token_{i}|>"
-      for i in range(5, 256 - 5)
-    ]
-    self.special_tokens = {token: len(mergeable_ranks) + i for i, token in enumerate(special_tokens)}
-
-    self.model = tiktoken.Encoding(name=model_path, pat_str=self.pat_str, mergeable_ranks=mergeable_ranks, special_tokens=self.special_tokens)
-
-  @property
-  def bos_id(self): return self.special_tokens["<|begin_of_text|>"]
-  @property
-  def stop_tokens(self): return {self.special_tokens["<|end_of_text|>"], self.special_tokens["<|eot_id|>"]}
-
-  def decode(self, toks): return self.model.decode([t for t in toks if t < self.num_base_tokens])
-  def encode(self, text, allow_special=False):
-    return self.model.encode(text, allowed_special="all" if allow_special else set(), disallowed_special=set())
 
 # **** helper functions ****
 def concat_weights(models, device=None):
@@ -215,9 +183,9 @@ class LlamaModel:
         self.model_size = model_size
         self.device = tuple(f"{Device.DEFAULT}:{i}" for i in range(shard)) if shard > 1 else Device.DEFAULT
         
-        # Initialize tokenizer
-        tokenizer_path = str((self.model_path if self.model_path.is_dir() else self.model_path.parent) / "tokenizer.model")
-        self.tokenizer = Tokenizer(tokenizer_path)
+        # # Initialize tokenizer
+        # tokenizer_path = str((self.model_path if self.model_path.is_dir() else self.model_path.parent) / "tokenizer.model")
+        # self.tokenizer = Tokenizer(tokenizer_path)
         
         # Build model
         self.model = build_transformer(self.model_path, model_size=self.model_size, 
@@ -265,6 +233,9 @@ class LlamaModel:
         """Download model files"""
         if size == "1B":
             fetch("https://huggingface.co/bofenghuang/Meta-Llama-3-8B/resolve/main/original/tokenizer.model", "tokenizer.model", subdir="llama3-1b-instruct")
+            fetch("https://huggingface.co/bofenghuang/Meta-Llama-3-8B/resolve/main/tokenizer.json", "tokenizer.json", subdir="llama3-1b-instruct")
+            fetch("https://huggingface.co/bofenghuang/Meta-Llama-3-8B/resolve/main/tokenizer_config.json", "tokenizer_config.json", subdir="llama3-1b-instruct")
+            fetch("https://huggingface.co/bofenghuang/Meta-Llama-3-8B/resolve/main/special_tokens_map.json", "special_tokens_map.json", subdir="llama3-1b-instruct")
             return fetch("https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q6_K.gguf", "Llama-3.2-1B-Instruct-Q6_K.gguf", subdir="llama3-1b-instruct")
         elif size == "8B":
             fetch("https://huggingface.co/bofenghuang/Meta-Llama-3-8B/resolve/main/original/tokenizer.model", "tokenizer.model", subdir="llama3-8b-sfr")
