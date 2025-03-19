@@ -2,6 +2,7 @@ from enum import Enum
 from typing import List, Dict
 from llguidance import LLInterpreter
 from llguidance.hf import from_tokenizer as llg_from_tokenizer
+from transformers import AutoTokenizer
 
 class TokenProcessingStatus(Enum):
     CONTINUE = None  # Continue processing tokens
@@ -43,14 +44,35 @@ class LlamaInferenceEngine:
     def __init__(self, model):
         self.model = model
 
-    def run_inference(self, prompt: str, generation_options: GenerationOptions):
-        structured_output = StructuredOutput(self.model, self.model.tokenizer.stop_tokens, generation_options)
+        tokenizer_path = str((self.model.model_path if self.model.model_path.is_dir() else self.model.model_path.parent))
+        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
 
-        toks = self.model.tokenizer.encode(prompt, allow_special=True)
+
+    def build_prompt(self, messages):
+        def encode_role(role: str):
+            return '<|start_header_id|>' + role + '<|end_header_id|>\n\n'
+
+        def encode_message(role: str, content: str):
+            return encode_role(role) + content + '<|eot_id|>'
+
+        # prompt = '<|begin_of_text|>'
+        prompt = ''
+        for message in messages:
+            prompt += encode_message(message["role"], message["content"])
+
+        prompt += encode_role("assistant")
+
+        return prompt
+
+    def run_inference(self, prompt: str, generation_options: GenerationOptions):
+        # For some reason the wrong stop token is loaded. So we hardcode for now.
+        stop_tokens = {self.tokenizer.eos_token_id, 128009}
+        structured_output = StructuredOutput(self.model, stop_tokens, generation_options)
+
+        toks = self.tokenizer.encode(prompt)
 
         start_pos = self.model.prefill(toks)
         last_tok = toks[-1]
-        self.model.last_seen_toks.append(last_tok)
 
         generated_tokens = []
 
@@ -69,12 +91,14 @@ class LlamaInferenceEngine:
 
             generated_tokens.append(tok)
 
-        return self.model.tokenizer.decode(generated_tokens), finish_reason
+        return self.tokenizer.decode(generated_tokens), finish_reason
 
     def run_inference_stream(self, prompt: str, generation_options: GenerationOptions):
-        structured_output = StructuredOutput(self.model, self.model.tokenizer.stop_tokens, generation_options)
-
-        toks = self.model.tokenizer.encode(prompt, allow_special=True)
+        # For some reason the wrong stop token is loaded. So we hardcode for now.
+        stop_tokens = {self.tokenizer.eos_token_id, 128009}
+        structured_output = StructuredOutput(self.model, stop_tokens, generation_options)
+        
+        toks = self.tokenizer.encode(prompt, allow_special=True)
 
         start_pos = self.model.prefill(toks)
         last_tok = toks[-1]
@@ -93,6 +117,6 @@ class LlamaInferenceEngine:
             if finish_reason != TokenProcessingStatus.CONTINUE:
                 break
 
-            yield self.model.tokenizer.decode([tok])
+            yield self.tokenizer.decode([tok])
 
         return finish_reason
