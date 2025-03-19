@@ -4,12 +4,13 @@ from llguidance import LLInterpreter
 from llguidance.hf import from_tokenizer as llg_from_tokenizer
 from transformers import AutoTokenizer
 import numpy as np
-from tinygrad import Tensor
+from tinygrad import Tensor, dtypes
 
 class TokenProcessingStatus(Enum):
     CONTINUE = None  # Continue processing tokens
     MAX_TOKENS_REACHED = "length"
     STOP_TOKEN_REACHED = "stop"
+    END_OF_SENTENCE = "grammar"
 
 class GenerationOptions:
     def __init__(self, temperature=None, max_tokens=None, grammar:Optional[str]=None):
@@ -59,7 +60,7 @@ class StructuredOutput:
             self.is_finished = True
             grammar_stop_reason = self.guidance_interpreter.stop_reason()
             if grammar_stop_reason == "EndOfSentence" or grammar_stop_reason == "NoExtension":
-                return TokenProcessingStatus.STOP_TOKEN_REACHED
+                return TokenProcessingStatus.END_OF_SENTENCE
             elif grammar_stop_reason == "MaxTokensTotal" or grammar_stop_reason == "MaxTokensParser":
                 return TokenProcessingStatus.MAX_TOKENS_REACHED
             else:
@@ -84,21 +85,6 @@ class LlamaInferenceEngine:
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
 
 
-    def build_prompt(self, messages):
-        def encode_role(role: str):
-            return '<|start_header_id|>' + role + '<|end_header_id|>\n\n'
-
-        def encode_message(role: str, content: str):
-            return encode_role(role) + content + '<|eot_id|>'
-
-        prompt = ''
-        for message in messages:
-            prompt += encode_message(message["role"], message["content"])
-
-        prompt += encode_role("assistant")
-
-        return prompt
-
     def run_inference(self, prompt: str, generation_options: GenerationOptions):
         # For some reason the wrong stop token is loaded. So we hardcode for now.
         stop_tokens = {self.tokenizer.eos_token_id, 128009}
@@ -118,18 +104,21 @@ class LlamaInferenceEngine:
             mask = structured_output.get_token_mask() == 200
 
             if mask is not None:
-                mask = Tensor(mask)
+                mask = Tensor(mask, dtype=dtypes.bool)
             else:
-                mask = Tensor.ones(self.model.model_size.args["vocab_size"], dtype=dtypes.int32, device=self.model.device) * 200
+                mask = Tensor.ones(self.model.model_size.args["vocab_size"], dtype=dtypes.bool, device=self.model.device)
 
             tok = self.model.generate_next_token(last_tok, mask, start_pos, generation_options.temperature)
             start_pos += 1
             last_tok = tok
             self.model.last_seen_toks.append(tok)
 
-            generated_tokens.append(tok)
-
             finish_reason = structured_output.push_token(tok)
+            
+            # If we have produced the stop token, we don't want to return it.
+            if finish_reason != TokenProcessingStatus.STOP_TOKEN_REACHED:
+                generated_tokens.append(tok)
+
             if finish_reason != TokenProcessingStatus.CONTINUE:
                 break
 
@@ -138,7 +127,7 @@ class LlamaInferenceEngine:
     def run_inference_stream(self, prompt: str, generation_options: GenerationOptions):
         # For some reason the wrong stop token is loaded. So we hardcode for now.
         stop_tokens = {self.tokenizer.eos_token_id, 128009}
-        structured_output = StructuredOutput(self.model, stop_tokens, generation_options)
+        structured_output = StructuredOutput(self.tokenizer, stop_tokens, generation_options)
         
         toks = self.tokenizer.encode(prompt)
 
@@ -149,15 +138,25 @@ class LlamaInferenceEngine:
             generation_options.temperature = self.model.TEMPERATURE
 
         while True:
-            tok = self.model.generate_next_token(last_tok, start_pos, generation_options.temperature)
+            mask = structured_output.get_token_mask() == 200
+
+            if mask is not None:
+                mask = Tensor(mask, dtype=dtypes.bool)
+            else:
+                mask = Tensor.ones(self.model.model_size.args["vocab_size"], dtype=dtypes.bool, device=self.model.device)
+
+            tok = self.model.generate_next_token(last_tok, mask, start_pos, generation_options.temperature)
             start_pos += 1
             last_tok = tok
             self.model.last_seen_toks.append(tok)
 
             finish_reason = structured_output.push_token(tok)
+
+            # If we have produced the stop token, we don't want to return it.
+            if finish_reason != TokenProcessingStatus.STOP_TOKEN_REACHED:
+                yield self.tokenizer.decode([tok])
+
             if finish_reason != TokenProcessingStatus.CONTINUE:
                 break
-
-            yield self.tokenizer.decode([tok])
 
         return finish_reason

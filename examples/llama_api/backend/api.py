@@ -120,37 +120,38 @@ class LlamaAPI:
 
             else:
                 # Store chunks and get finish_reason from the generator
-                chunks = []
-                for chunk in self.inference_engine.run_inference_stream(prompt, generation_options):
-                    chunks.append(chunk)
-                    yield f"data: {json.dumps({
+                tokens = []
+                for token in self.inference_engine.run_inference_stream(prompt, generation_options):
+                    if isinstance(token, str):
+                        tokens.append(token)
+                        yield f"data: {json.dumps({
                             'id': random_id,
                             'object': 'chat.completion.chunk',
                             'created': int(time.time()),
                             'model': str(self.inference_engine.model.model_path),
                             'choices': [{
                                 'index': 0,
-                                'delta': {'content': chunk},
+                                'delta': {'content': token},
                             }],
                             'finish_reason': None,
                         })}\n\n"
+                    else:
+                        # If the token is not a string, it's the finish_reason
+                        finish_reason = token.value 
 
-                # Get the finish_reason from the generator
-                finish_reason = yield
-                
-                res = {
-                    'id': random_id,
-                    'object': 'chat.completion.chunk',
-                    'created': int(time.time()),
-                    'model': str(self.inference_engine.model.model_path),
-                    'choices': [{
-                        'index': 0,
-                        'delta': {},
-                        'finish_reason': finish_reason.value,
-                    }]
-                }
-                yield f"data: {json.dumps(res)}\n\n"
-    
+                        res = {
+                            'id': random_id,
+                            'object': 'chat.completion.chunk',
+                            'created': int(time.time()),
+                            'model': str(self.inference_engine.model.model_path),
+                            'choices': [{
+                                'index': 0,
+                                'delta': {},
+                                'finish_reason': finish_reason,
+                            }]
+                        }
+                        yield f"data: {json.dumps(res)}\n\n"
+
     def run(self, host="0.0.0.0", port=7776, debug=True):
         """Start the API server"""
         print(f'debug {debug}')

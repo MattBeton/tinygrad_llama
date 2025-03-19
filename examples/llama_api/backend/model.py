@@ -209,7 +209,7 @@ class LlamaModel:
             self.last_seen_toks = toks
             toks = toks[i:]
 
-        logits_mask = Tensor.ones(MODEL_PARAMS[self.model_size]["args"]["vocab_size"], dtype=dtypes.int32, device=self.device) * 200
+        logits_mask = Tensor.ones(MODEL_PARAMS[self.model_size]["args"]["vocab_size"], dtype=dtypes.bool, device=self.device)
 
         # Prefill the model
         for tok in tqdm(toks):

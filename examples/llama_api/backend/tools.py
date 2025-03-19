@@ -64,7 +64,7 @@ class LlamaToolParser(ToolParser):
 
             messages.insert(0, {"role": "system", "content": system_prompt})
 
-        prompt = '<|begin_of_text|>'
+        prompt = ''
         for message in messages:
             prompt += encode_message(message["role"], message["content"])
 

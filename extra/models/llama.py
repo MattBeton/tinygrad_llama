@@ -183,7 +183,7 @@ class Transformer:
     logits = self.output(self.norm(h)).float()[:, -1, :]
 
     # Mask logits
-    logits = (logits_mask == 0).where(float("-inf"), logits)
+    logits = logits_mask.where(logits, float('-inf'))
 
     return sample(logits.flatten(), temperature, top_k, top_p, alpha_f, alpha_p).realize()
 
