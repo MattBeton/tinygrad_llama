@@ -209,22 +209,24 @@ class LlamaModel:
             self.last_seen_toks = toks
             toks = toks[i:]
 
+        logits_mask = Tensor.ones(MODEL_PARAMS[self.model_size]["args"]["vocab_size"], dtype=dtypes.int32, device=self.device) * 200
+
         # Prefill the model
         for tok in tqdm(toks):
             GlobalCounters.reset()
-            self.model(Tensor([[tok]], device=self.device), start_pos, 
+            self.model(Tensor([[tok]], device=self.device), logits_mask.contiguous(), start_pos, 
                       self.TEMPERATURE, self.TOP_K, self.TOP_P, 
                       self.ALPHA_F, self.ALPHA_P).realize()
             start_pos += 1
         return start_pos
 
-    def generate_next_token(self, last_tok, start_pos, temperature=None):
+    def generate_next_token(self, last_tok, logits_mask, start_pos, temperature=None):
         """Generate the next token given the last token and position"""
         if temperature is None:
-            temperature = self.TEMPERATURE
-            
+          temperature = self.TEMPERATURE
+
         GlobalCounters.reset()
-        tok = self.model(Tensor([[last_tok]], device=self.device), start_pos, 
+        tok = self.model(Tensor([[last_tok]], device=self.device), logits_mask.contiguous(), start_pos, 
                         temperature, self.TOP_K, self.TOP_P, 
                         self.ALPHA_F, self.ALPHA_P).item()
         return tok

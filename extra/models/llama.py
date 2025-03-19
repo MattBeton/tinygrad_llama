@@ -171,7 +171,7 @@ class Transformer:
     self.freqs_cis = precompute_freqs_cis(dim // n_heads, self.max_context * 2, rope_theta).contiguous()
     self.forward_jit = TinyJit(self.forward) if jit else None
 
-  def forward(self, tokens:Tensor, start_pos:Union[Variable,int], temperature:float, top_k:int, top_p:float, alpha_f:float, alpha_p:float):
+  def forward(self, tokens:Tensor, logits_mask:Tensor, start_pos:Union[Variable,int], temperature:float, top_k:int, top_p:float, alpha_f:float, alpha_p:float):
     _bsz, seqlen = tokens.shape
     h = self.tok_embeddings(tokens)
 
@@ -182,13 +182,24 @@ class Transformer:
     for layer in self.layers: h = layer(h, start_pos, freqs_cis, mask)
     logits = self.output(self.norm(h)).float()[:, -1, :]
 
+    # print(logits.realize().numpy()[:100])
+    # print(logits_mask.realize().numpy()[:100])
+
+    # mask = (logits_mask == 0).astype(logits.dtype)
+    # # Replace logits: keep original where mask is 0, and set to -inf where mask is 1.
+    # logits = logits * (1 - mask) + mask * float("-inf")
+    
+    # logits = (logits_mask == 0).where(float("-inf"), logits)
+
+    # print(logits.realize().numpy()[:100])
+
     return sample(logits.flatten(), temperature, top_k, top_p, alpha_f, alpha_p).realize()
 
-  def __call__(self, tokens:Tensor, start_pos:int, temperature:float=0.0, top_k:int=0, top_p:float=0.8, alpha_f:float=0.0, alpha_p:float=0.0):
+  def __call__(self, tokens:Tensor, logits_mask:Tensor, start_pos:int, temperature:float=0.0, top_k:int=0, top_p:float=0.8, alpha_f:float=0.0, alpha_p:float=0.0):
     # TODO: better way to handle the first call v.s. the rest?
     if tokens.shape[0:2] == (1,1) and self.forward_jit is not None and start_pos != 0:
-      return self.forward_jit(tokens, Variable("start_pos", 1, self.max_context).bind(start_pos), temperature, top_k, top_p, alpha_f, alpha_p)
-    return self.forward(tokens, start_pos, temperature, top_k, top_p, alpha_f, alpha_p)
+      return self.forward_jit(tokens, logits_mask, Variable("start_pos", 1, self.max_context).bind(start_pos), temperature, top_k, top_p, alpha_f, alpha_p)
+    return self.forward(tokens, logits_mask, start_pos, temperature, top_k, top_p, alpha_f, alpha_p)
 
 # *** helpers ***
 
