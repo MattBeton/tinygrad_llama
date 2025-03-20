@@ -93,9 +93,9 @@ class LlamaAPI:
             grammar = tools_parser.to_grammar(tools, rjson.get("strict", False))
             generation_options = GenerationOptions(temperature=rjson.get("temperature"), max_tokens=rjson.get("max_tokens"), grammar=grammar)
 
-            # ensure that the last message was a user message
-            if rjson["messages"][-1]["role"] != "user": 
-                abort(400, "last message must be a user message")
+            # # ensure that the last message was a user message
+            # if rjson["messages"][-1]["role"] != "user": 
+            #     abort(400, "last message must be a user message")
                 
             random_id = random.randbytes(16).hex()
 
@@ -104,6 +104,8 @@ class LlamaAPI:
                 inference_result, finish_reason = self.inference_engine.run_inference(prompt, generation_options)
 
                 if tools_parser.is_tool_section(inference_result):
+                    print(tools_parser.parse_complete(inference_result))
+
                     tool_calls = [{
                         "index": i,
                         "function": tool_call.model_dump(),

@@ -6,7 +6,7 @@ import re
 
 class UnplacedToolCall(BaseModel):
   name: str
-  arguments: str
+  arguments: dict[str, Any]
 
 class ToolDefinition(BaseModel):
     """
@@ -47,9 +47,25 @@ class LlamaToolParser(ToolParser):
     def build_prompt(self, messages: List[Dict[str, str]], tools: Optional[List[Dict]] = None) -> str:
         def encode_role(role: str):
             return '<|start_header_id|>' + role + '<|end_header_id|>\n\n'
+        
+        def encode_tool_calls(tool_calls: List[Dict[str, str]]):
+            text = '['
+            for tool_call in tool_calls:
+                text += tool_call['function']['name'] + '('
+                text += ', '.join([f'{key}={value}' for key, value in tool_call['function']['arguments'].items()])
+                text += ')'
+            text += ']'
+            return text
 
-        def encode_message(role: str, content: str):
-            return encode_role(role) + content + '<|eot_id|>'
+        def encode_message(message: Dict[str, str]):
+            if not message["role"] and 'tool_calls' in message:
+                return encode_role('assistant') + encode_tool_calls(message['tool_calls']) + '<|eot_id|>'
+            elif message['role'] == 'tool':
+                return encode_role('ipython') + message["content"] + '<|eot_id|>'
+            elif message['role']:
+                return encode_role(message["role"]) + message["content"] + '<|eot_id|>'
+            else:
+                raise ValueError("Invalid message")
 
         print(messages, tools)
 
@@ -69,11 +85,22 @@ class LlamaToolParser(ToolParser):
 
             messages.insert(0, {"role": "system", "content": system_prompt})
 
+        else:
+            system_prompt = """
+            Cutting Knowledge Date: December 2023
+            Today Date: 23 July 2024
+
+            You are a helpful assistant"""
+
+            messages.insert(0, {"role": "system", "content": system_prompt})
+
         prompt = ''
         for message in messages:
-            prompt += encode_message(message["role"], message["content"])
+            prompt += encode_message(message)
 
         prompt += encode_role("assistant")
+
+        print(prompt)
 
         return prompt
 
@@ -138,6 +165,8 @@ class LlamaToolParser(ToolParser):
         else:
             inner = content
 
+        print(inner)
+
         # Regex pattern to match each function call.
         # It captures the function name and the content between the parentheses.
         pattern = r'([a-zA-Z_][a-zA-Z0-9_]*)\(\s*(.*?)\s*\)'
@@ -155,8 +184,11 @@ class LlamaToolParser(ToolParser):
                         params["arg"] = part.strip()
             tool_calls.append(UnplacedToolCall(
                 name=func_name,
-                arguments=json.dumps(params)
+                arguments=params
             ))
+
+        print(tool_calls)
+
         return tool_calls
 
 
