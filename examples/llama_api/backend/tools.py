@@ -28,7 +28,7 @@ class ToolParser:
     def build_prompt(self, messages: List[Dict[str, str]], tools: List[Dict[str, str]]) -> str:
         pass
 
-    def is_start_of_tool_section(self, token: int):
+    def is_tool_section(self, response: str) -> bool:
         pass
 
     def to_grammar(self, tools: list[ToolDefinition], required: bool, parallel_tool_calling: bool) -> str:
@@ -41,12 +41,17 @@ class LlamaToolParser(ToolParser):
     def __init__(self):
         pass
 
+    def is_tool_section(self, response: str) -> bool:
+        return response.startswith('[') and response.endswith(']')
+
     def build_prompt(self, messages: List[Dict[str, str]], tools: Optional[List[Dict]] = None) -> str:
         def encode_role(role: str):
             return '<|start_header_id|>' + role + '<|end_header_id|>\n\n'
 
         def encode_message(role: str, content: str):
             return encode_role(role) + content + '<|eot_id|>'
+
+        print(messages, tools)
 
         if tools:
             tools = [tool.model_dump() for tool in tools]
@@ -118,28 +123,6 @@ class LlamaToolParser(ToolParser):
     PARAM_VALUE: /[^,()\\]]+/
         """.strip())
 
-#     def to_grammar(self, tools: list[ToolDefinition], required: bool) -> str:
-#         """
-#         Returns a Lark grammar string that describes the new plaintext function call format.
-#         The expected output should be a list of function calls, e.g.:
-        
-#           [func_name1(param1=value1, param2=value2), func_name2(arg)]
-#         """
-#         return lark_grammar(f"""
-# %llguidance {{}}
-
-# start: {"fun_calls" if required else "TEXT | fun_calls"}
-# TEXT: /[^\\[](.|\n)*/
-# fun_calls: "[" fun_call ("," fun_call)* "]"
-# fun_call: FUNCTION_NAME "(" [parameters] ")"
-# FUNCTION_NAME: /[a-zA-Z_][a-zA-Z0-9_]*/
-# ?parameters: parameter ("," parameter)*
-# ?parameter: PARAM_NAME "=" PARAM_VALUE   -> key_value
-#          | PARAM_VALUE                   -> value_only
-# PARAM_NAME: /[a-zA-Z_][a-zA-Z0-9_]*/
-# PARAM_VALUE: /[^,()\\]]+/
-#         """.strip())
-
     def parse_complete(self, content: str) -> list[UnplacedToolCall]:
         """
         Parses plaintext function call outputs in the form:
@@ -204,82 +187,3 @@ class LlamaToolParser(ToolParser):
             tool_signatures.append(f"{func_name}({params_str})")
         # The schema is a list of function call signatures.
         return f"[{', '.join(tool_signatures)}]"
-
-    # def is_start_of_tool_section(self, token: int):
-    #     return token == 128010 or token == 5324
-
-    # def to_grammar(self, tools: list[ToolDefinition], required: bool) -> str:
-    #     def generate_tool_call_json_schema(tools: list[ToolDefinition], parameter_key: str = "arguments") -> dict[str, Any]:
-    #         """
-    #         Generate a JSON schema for tool calling. For a given tool name, the schema should have the rough form of:
-
-    #         type ValidToolCall[name] = {
-    #         "name": name,
-    #         "arguments": tools[name].parameters
-    #         }
-
-    #         With the overall schema looking like:
-
-    #         // For each tool in the list
-    #         type ValidToolCall = ValidToolCall[name] | ...;
-
-    #         Ie it should be a union of all the tool calls, disjoint from each other by the unqiue "name" field.
-    #         """
-    #         if len(tools) == 0:
-    #             raise ValueError("No tools provided")
-
-    #         schema_variants = []
-
-    #         for tool in tools:
-    #             # Create a schema variant for this tool
-    #             tool_schema = {
-    #                 "type": "object",
-    #                 "properties": {
-    #                     # TODO: The LLama example on LLGuidance uses "name": { "const": "get_weather" } which might be easier?
-    #                     "name": {
-    #                         "type": "string",
-    #                         "enum": [tool.function.name]
-    #                     },
-    #                     parameter_key: tool.function.parameters
-    #                 },
-    #                 "required": ["name", parameter_key],
-    #                 "additionalProperties": False
-    #             }
-    #             schema_variants.append(tool_schema)
-
-    #         # Combine all tool schemas into a oneOf union
-    #         if len(schema_variants) == 1:
-    #             # Just return the single schema if only one tool
-    #             return schema_variants[0]
-    #         else:
-    #             # Return a union of all tool schemas
-    #             return {"oneOf": schema_variants}
-
-    #     # This is lifted from https://github.com/guidance-ai/llguidance/blob/cc83715f/docs/syntax.md#special-tokens
-    #     return lark_grammar(f"""
-    # %llguidance {{}}
-
-    # start: {"fun_call" if required else "TEXT | fun_call"}
-    # TEXT: /[^{{](.|\n)*/
-    # fun_call: <|python_tag|> json_body <|eom_id|>
-    # json_body: %json{json.dumps(generate_tool_call_json_schema(tools, "parameters"))}
-    #     """.strip())
-
-    # def parse_complete(self, content: str, parallel_tool_calling: bool = False) -> list[UnplacedToolCall]:
-    #     raise NotImplementedError("Not implemented")
-    #     tool_calls = []
-
-    #     for m in re.finditer(r"<\|python_tag\|>(.+)<\|eom_id\|>", content, re.DOTALL):
-    #         try:
-    #             remapped = json.loads(m.group(1))
-
-    #             # Rename "parameters" to "arguments" as that is the expected format
-    #             tool_calls.append(UnplacedToolCall(
-    #             name=remapped["name"],
-    #             arguments=json.dumps(remapped["parameters"])
-    #             ))
-    #         except json.JSONDecodeError as e:
-    #             print(f"Failed to parse python_tag tool calls: {e}")
-
-    #     return tool_calls
-

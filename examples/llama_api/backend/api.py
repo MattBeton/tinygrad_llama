@@ -1,6 +1,7 @@
 from pathlib import Path
 import json, random, time
 from bottle import Bottle, request, response, HTTPResponse, abort, static_file
+import uuid
 from .inference import LlamaInferenceEngine, GenerationOptions
 from .tools import LlamaToolParser, ToolDefinition
 
@@ -101,22 +102,45 @@ class LlamaAPI:
             # For non-streaming, collect all generated tokens
             if not streaming:
                 inference_result, finish_reason = self.inference_engine.run_inference(prompt, generation_options)
-                
-                # Return a single response with the complete message
-                yield json.dumps({
-                    "id": random_id,
-                    "object": "chat.completion",
-                    "created": int(time.time()),
-                    "model": str(self.inference_engine.model.model_path),
-                    "choices": [{
-                        "index": 0,
-                        "message": {
-                            "role": "assistant",
-                            "content": inference_result,
-                        },
-                        "finish_reason": finish_reason.value,
-                    }]
-                })
+
+                if tools_parser.is_tool_section(inference_result):
+                    tool_calls = [{
+                        "index": i,
+                        "function": tool_call.model_dump(),
+                        "id": f"tool_call_{str(uuid.uuid4())}",
+                        "type": "function",
+                    } for i, tool_call in enumerate(tools_parser.parse_complete(inference_result))]
+
+                    yield json.dumps({
+                        "id": f"chatcmpl-{random_id}",
+                        "object": "chat.completion",
+                        "created": int(time.time()),
+                        "model": str(self.inference_engine.model.model_path),
+                        "system_fingerprint": f"exo_v1.5",
+                        "choices": [{
+                            "index": 0,
+                            "logprobs": None,
+                            "finish_reason": 'tool_calls',
+                            "message": {
+                                "tool_calls": tool_calls,
+                            }
+                        }]
+                    })
+                else:
+                    yield json.dumps({
+                        "id": random_id,
+                        "object": "chat.completion",
+                        "created": int(time.time()),
+                        "model": str(self.inference_engine.model.model_path),
+                        "choices": [{
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": inference_result,
+                            },
+                            "finish_reason": finish_reason.value,
+                        }]
+                    })
 
             else:
                 # Store chunks and get finish_reason from the generator
